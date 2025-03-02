@@ -6,12 +6,12 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
-import { createId } from "@paralleldrive/cuid2"; // Import cuid
+import { createId } from "@paralleldrive/cuid2"; // Pastikan sudah diinstall
 dayjs.extend(utc);
 
 const HAS_SEEN_MODAL_KEY = "hasSeenModal";
 const APP_VERSION_KEY = "appVersion";
-const CURRENT_APP_VERSION = "1.0.0";
+const CURRENT_APP_VERSION = "1.2.0";
 
 declare global {
   interface Window {
@@ -26,6 +26,7 @@ declare global {
             photo_url?: string;
           };
         };
+        ready?: () => void; // Tambahan untuk memastikan WebApp siap
       };
     };
     show_9004505?: (config?: {
@@ -42,7 +43,7 @@ declare global {
 }
 
 const FALLBACK_TELEGRAM_DATA = {
-  id: 999999,
+  id: 12345678,
   first_name: "TestUser",
   username: "testuser_local",
   photo_url: "/LOGO.jpg",
@@ -76,60 +77,92 @@ export default function Home() {
   useEffect(() => {
     const initializeUser = async () => {
       const storedVersion = localStorage.getItem(APP_VERSION_KEY);
-      let telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
       let storedId = localStorage.getItem("userId");
 
-      const isLocalhost =
-        window.location.hostname === "localhost" ||
-        window.location.hostname === "127.0.0.1";
-      if (!telegramData && isLocalhost) {
-        console.log("Running on localhost, using fallback Telegram data");
-        telegramData = FALLBACK_TELEGRAM_DATA;
-      }
+      // Tambahkan script Telegram WebApp secara dinamis
+      const telegramScript = document.createElement("script");
+      telegramScript.src = "https://telegram.org/js/telegram-web-app.js";
+      telegramScript.async = true;
+      document.body.appendChild(telegramScript);
 
-      if (storedVersion !== CURRENT_APP_VERSION || !storedId) {
-        localStorage.clear();
-        sessionStorage.clear();
-        localStorage.setItem(APP_VERSION_KEY, CURRENT_APP_VERSION);
-        console.log(
-          "App version changed or no user ID. Resetting local data..."
-        );
-        storedId = createId(); // Generate ID baru dengan cuid
-        localStorage.setItem("userId", storedId);
-      }
+      telegramScript.onload = async () => {
+        console.log("Telegram WebApp script loaded");
+        if (window.Telegram?.WebApp) {
+          window.Telegram.WebApp.ready?.(); // Pastikan WebApp siap
+        }
 
-      if (telegramData) {
+        let telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+        const isLocalhost =
+          window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1";
+
+        // Gunakan fallback jika tidak ada data Telegram
+        if (!telegramData) {
+          console.log("No Telegram data available, using fallback");
+          telegramData = FALLBACK_TELEGRAM_DATA;
+        }
+
+        // Reset local storage jika versi berubah
+        if (storedVersion !== CURRENT_APP_VERSION || !storedId) {
+          localStorage.clear();
+          sessionStorage.clear();
+          localStorage.setItem(APP_VERSION_KEY, CURRENT_APP_VERSION);
+          console.log(
+            "App version changed or no user ID. Resetting local data..."
+          );
+          storedId = createId(); // Generate ID baru dengan cuid
+          localStorage.setItem("userId", storedId);
+        }
+
+        setTelegramName(telegramData.first_name ?? "Pengguna");
+        setTelegramUsername(telegramData.username ?? "");
+        setPhotoUrl(telegramData.photo_url ?? null);
+        setUserId(storedId);
+
+        await checkAndSaveUser(storedId, telegramData);
+        await fetchUserData(storedId);
+      };
+
+      telegramScript.onerror = () => {
+        console.error("Failed to load Telegram WebApp script");
+        setError("Gagal memuat script Telegram");
+        // Gunakan fallback langsung jika script gagal
+        const telegramData = FALLBACK_TELEGRAM_DATA;
         setTelegramName(telegramData.first_name ?? "Pengguna");
         setTelegramUsername(telegramData.username ?? "");
         setPhotoUrl(telegramData.photo_url ?? null);
 
+        if (!storedId || storedVersion !== CURRENT_APP_VERSION) {
+          storedId = createId();
+          localStorage.setItem("userId", storedId);
+        }
         setUserId(storedId);
-        await checkAndSaveUser(storedId, telegramData);
-        await fetchUserData(storedId); // Ambil data setelah simpan
-      } else {
-        console.error("No Telegram data available and not on localhost");
-        setError("Tidak ada data Telegram tersedia");
-        return;
-      }
+        checkAndSaveUser(storedId, telegramData).then(() =>
+          fetchUserData(storedId as string)
+        );
+      };
 
       const hasSeenModal = sessionStorage.getItem(HAS_SEEN_MODAL_KEY);
       if (!hasSeenModal) {
         setShowWelcomeModal(true);
       }
 
-      const script = document.createElement("script");
-      script.src = "//whephiwums.com/sdk.js";
-      script.setAttribute("data-zone", "9004505");
-      script.setAttribute("data-sdk", "show_9004505");
-      script.async = true;
-      document.body.appendChild(script);
+      const monetagScript = document.createElement("script");
+      monetagScript.src = "//whephiwums.com/sdk.js";
+      monetagScript.setAttribute("data-zone", "9004505");
+      monetagScript.setAttribute("data-sdk", "show_9004505");
+      monetagScript.async = true;
+      document.body.appendChild(monetagScript);
 
-      script.onload = () => console.log("Monetag SDK loaded");
-      script.onerror = () => console.error("Failed to load Monetag SDK");
+      monetagScript.onload = () => console.log("Monetag SDK loaded");
+      monetagScript.onerror = () => console.error("Failed to load Monetag SDK");
 
       return () => {
-        if (document.body.contains(script)) {
-          document.body.removeChild(script);
+        if (document.body.contains(telegramScript)) {
+          document.body.removeChild(telegramScript);
+        }
+        if (document.body.contains(monetagScript)) {
+          document.body.removeChild(monetagScript);
         }
       };
     };
@@ -149,8 +182,8 @@ export default function Home() {
           const telegramData =
             window.Telegram?.WebApp?.initDataUnsafe?.user ||
             FALLBACK_TELEGRAM_DATA;
-          await checkAndSaveUser(id, telegramData); // Buat user baru jika 404
-          await fetchUserData(id); // Coba ambil lagi setelah dibuat
+          await checkAndSaveUser(id, telegramData);
+          await fetchUserData(id); // Coba lagi setelah simpan
           return;
         }
         throw new Error(
@@ -219,7 +252,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: id, // Gunakan ID yang sudah di-generate dengan cuid
+          id,
           telegramName: telegramData.first_name ?? "Pengguna",
           telegramUsername: telegramData.username ?? "",
           photoUrl: telegramData.photo_url ?? null,
@@ -256,7 +289,7 @@ export default function Home() {
         telegramData = FALLBACK_TELEGRAM_DATA;
       }
       if (telegramData) {
-        const newId = createId(); // Generate ID baru dengan cuid
+        const newId = createId();
         localStorage.setItem("userId", newId);
         setUserId(newId);
         await checkAndSaveUser(newId, telegramData);

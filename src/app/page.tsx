@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image"; // Import Image
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
@@ -18,7 +18,7 @@ declare global {
           user?: {
             id: number;
             first_name?: string;
-            last_name?: string; // Tambahkan last_name
+            last_name?: string;
             username?: string;
             photo_url?: string;
           };
@@ -53,72 +53,78 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [remainingQuota, setRemainingQuota] = useState(63);
   const [progress, setProgress] = useState(0);
+  const [telegramName, setTelegramName] = useState<string>("Pengguna");
+  const [telegramUsername, setTelegramUsername] = useState<string>("");
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const maxAdViews = 63;
   const adReward = 8;
   const [isWatchAdButtonDisabled, setIsWatchAdButtonDisabled] = useState(false);
   const [watchAdButtonCountdown, setWatchAdButtonCountdown] = useState(0);
   const router = useRouter();
 
-  // Tambahkan state untuk data profil
-  const [telegramName, setTelegramName] = useState<string>("Pengguna"); // Default value
-  const [telegramUsername, setTelegramUsername] = useState<string>(""); // Default value
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null); // Default value
-
   useEffect(() => {
-    let storedId = localStorage.getItem("userId");
+    const initializeUser = async () => {
+      const telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      let storedId = localStorage.getItem("userId");
 
-    if (!storedId) {
-      if (typeof window.Telegram?.WebApp !== "undefined") {
-        const telegramId =
-          window.Telegram.WebApp.initDataUnsafe?.user?.id.toString();
-        if (telegramId) {
-          localStorage.setItem("userId", telegramId);
-          storedId = telegramId;
+      // Ambil data dari Telegram jika tersedia
+      if (telegramData) {
+        setTelegramName(telegramData.first_name ?? "Pengguna");
+        setTelegramUsername(telegramData.username ?? "");
+        setPhotoUrl(telegramData.photo_url ?? null);
+
+        if (!storedId) {
+          storedId = telegramData.id.toString();
+          localStorage.setItem("userId", storedId);
+          await saveNewUser(telegramData); // Simpan user baru
         }
       }
-    }
-    setUserId(storedId);
 
-    const hasSeenModal = sessionStorage.getItem(HAS_SEEN_MODAL_KEY);
-    if (!hasSeenModal) {
-      setShowWelcomeModal(true);
-    }
+      setUserId(storedId);
 
-    const script = document.createElement("script");
-    script.src = "//whephiwums.com/sdk.js";
-    script.setAttribute("data-zone", "9004505");
-    script.setAttribute("data-sdk", "show_9004505");
-    script.async = true;
-    document.body.appendChild(script);
-
-    script.onload = () => console.log("Monetag SDK loaded");
-    script.onerror = () => console.error("Failed to load Monetag SDK");
-
-    if (storedId) {
-      fetchUserData(storedId);
-    }
-
-    return () => {
-      if (document.body.contains(script)) {
-        document.body.removeChild(script);
+      const hasSeenModal = sessionStorage.getItem(HAS_SEEN_MODAL_KEY);
+      if (!hasSeenModal) {
+        setShowWelcomeModal(true);
       }
+
+      const script = document.createElement("script");
+      script.src = "//whephiwums.com/sdk.js";
+      script.setAttribute("data-zone", "9004505");
+      script.setAttribute("data-sdk", "show_9004505");
+      script.async = true;
+      document.body.appendChild(script);
+
+      script.onload = () => console.log("Monetag SDK loaded");
+      script.onerror = () => console.error("Failed to load Monetag SDK");
+
+      if (storedId) {
+        await fetchUserData(storedId);
+      }
+
+      return () => {
+        if (document.body.contains(script)) {
+          document.body.removeChild(script);
+        }
+      };
     };
+
+    initializeUser();
   }, []);
 
-  const fetchUserData = async (id: string | null) => {
-    if (!id) return false;
+  const fetchUserData = async (id: string) => {
     setLoading(true);
     try {
       const response = await fetch(`/api/user?userId=${id}`);
+      if (!response.ok) throw new Error("Failed to fetch user data");
+
       const data = await response.json();
-      console.log("fetchUserData - Raw data from server:", data);
+      console.log("fetchUserData - Raw data:", data);
 
       if (data.user) {
         const today = dayjs().utc().format("YYYY-MM-DD");
         let newTodayAdViews = data.user.todayAdViews;
 
         if (data.user.lastAdViewDate !== today) {
-          console.log("fetchUserData - Resetting todayAdViews...");
           newTodayAdViews = 0;
           await fetch("/api/user", {
             method: "PUT",
@@ -137,67 +143,60 @@ export default function Home() {
         setTotalAdViews(data.user.totalAdViews);
         setRemainingQuota(maxAdViews - newTodayAdViews);
         setProgress((newTodayAdViews / maxAdViews) * 100);
-        localStorage.setItem("userId", data.user.id);
-
-        // Update data profil
         setTelegramName(data.user.telegramName);
         setTelegramUsername(data.user.telegramUsername);
         setPhotoUrl(data.user.photoUrl);
-
-        return true;
       }
-      return false;
     } catch (error) {
       console.error("Error fetching user data:", error);
-      return false;
     } finally {
       setLoading(false);
     }
   };
 
-  const saveNewUser = async () => {
-    const telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  interface TelegramUser {
+    id: number;
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+    photo_url?: string;
+  }
+
+  const saveNewUser = async (telegramData: TelegramUser) => {
     try {
       const today = dayjs().utc().format("YYYY-MM-DD");
       const response = await fetch("/api/user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          telegramName: telegramData?.first_name || "Tidak memiliki nama", //dari telegram
-          telegramUsername: telegramData?.username || "Tidak memiliki username", // dari telegram
-          photoUrl: telegramData?.photo_url || null, //dari telegram
+          id: telegramData.id.toString(),
+          telegramName: telegramData.first_name ?? "Pengguna",
+          telegramUsername: telegramData.username ?? "",
+          photoUrl: telegramData.photo_url ?? null,
           lastAdViewDate: today,
         }),
       });
+
+      if (!response.ok) throw new Error("Failed to save new user");
+
       const data = await response.json();
-      console.log("saveNewUser - data from server:", data);
+      console.log("saveNewUser - Response:", data);
       setUserId(data.user.id);
       localStorage.setItem("userId", data.user.id);
-
-      // Inisialisasi state, termasuk data profil
-      setTodayAdViews(0);
-      setRemainingQuota(maxAdViews);
-      setProgress(0);
-      setTelegramName(telegramData?.first_name ?? "Tidak memiliki nama");
-      setTelegramUsername(telegramData?.username ?? "Tidak memiliki username");
-      setPhotoUrl(telegramData?.photo_url ?? null);
-
-      return true;
     } catch (error) {
       console.error("Error saving new user:", error);
-      return false;
     }
   };
 
   const handleAgree = async () => {
     setLoading(true);
     if (!userId) {
-      await saveNewUser();
-    } else {
-      const userExists = await fetchUserData(userId);
-      if (!userExists) {
-        await saveNewUser();
+      const telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      if (telegramData) {
+        await saveNewUser(telegramData);
       }
+    } else {
+      await fetchUserData(userId);
     }
     setModalStage("watchAd");
     setLoading(false);
@@ -298,7 +297,7 @@ export default function Home() {
     };
 
     const adSuccess = await playAd();
-    if (adSuccess) {
+    if (adSuccess && userId) {
       try {
         const newBalance = balance + adReward;
         const newTodayAdViews = todayAdViews + 1;
@@ -328,11 +327,25 @@ export default function Home() {
 
     setLoading(false);
   };
+
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900 font-sans py-8">
       <header className="p-4 text-center flex gap-2 items-center justify-center">
-        <h1 className="text-2xl font-bold text-blue-600">Panen Saldo Dana 1</h1>
-        <Image src="/danalogo.png" alt="Logo" width={48} height={48} />
+        {photoUrl && (
+          <Image
+            src={photoUrl}
+            alt="Profile"
+            width={48}
+            height={48}
+            className="rounded-full"
+          />
+        )}
+        <div>
+          <h1 className="text-2xl font-bold text-blue-600">Panen Saldo Dana</h1>
+          <p className="text-sm text-gray-600">
+            @{telegramUsername || "unknown"}
+          </p>
+        </div>
       </header>
 
       <main className="flex-grow p-4">
@@ -409,7 +422,7 @@ export default function Home() {
           ) : remainingQuota <= 0 ? (
             "Batas Harian Tercapai"
           ) : (
-            "Tonton Iklan +Rp 7"
+            "Tonton Iklan +Rp 8"
           )}
         </button>
 
@@ -467,25 +480,7 @@ export default function Home() {
                   disabled={loading}
                   className="w-full py-2 px-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:text-gray-500"
                 >
-                  {loading ? (
-                    <svg
-                      className="w-5 h-5 mx-auto text-gray-200 animate-spin fill-blue-600"
-                      viewBox="0 0 100 101"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z"
-                        fill="currentColor"
-                      />
-                      <path
-                        d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z"
-                        fill="currentFill"
-                      />
-                    </svg>
-                  ) : (
-                    "Setuju dan Lanjutkan"
-                  )}
+                  {loading ? "Memuat..." : "Setuju dan Lanjutkan"}
                 </button>
               </>
             )}
@@ -504,27 +499,11 @@ export default function Home() {
                   }
                   className="w-full py-2 px-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:text-gray-500"
                 >
-                  {isModalButtonDisabled ? (
-                    `Tunggu (${modalButtonCooldown} detik)`
-                  ) : loading ? (
-                    <svg
-                      className="w-5 h-5 mx-auto text-gray-200 animate-spin fill-blue-600"
-                      viewBox="0 0 100 101"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z"
-                        fill="currentColor"
-                      />
-                      <path
-                        d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z"
-                        fill="currentFill"
-                      />
-                    </svg>
-                  ) : (
-                    "Tonton Iklan"
-                  )}
+                  {isModalButtonDisabled
+                    ? `Tunggu (${modalButtonCooldown} detik)`
+                    : loading
+                    ? "Memutar..."
+                    : "Tonton Iklan"}
                 </button>
               </>
             )}

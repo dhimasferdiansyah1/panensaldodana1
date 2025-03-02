@@ -12,88 +12,102 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "User ID required" }, { status: 400 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const today = dayjs().utc().format("YYYY-MM-DD");
-  if (user.lastAdViewDate !== today) {
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: { todayAdViews: 0, lastAdViewDate: today },
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
     });
-    // Sertakan photoUrl, telegramName, dan telegramUsername
-    return NextResponse.json({
-      user: {
-        ...updatedUser,
-        photoUrl: updatedUser.photoUrl,
-        telegramName: updatedUser.telegramName,
-        telegramUsername: updatedUser.telegramUsername,
-      },
-    });
-  }
 
-  // Sertakan photoUrl, telegramName, dan telegramUsername
-  return NextResponse.json({
-    user: {
-      ...user,
-      photoUrl: user.photoUrl,
-      telegramName: user.telegramName,
-      telegramUsername: user.telegramUsername,
-    },
-  });
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const today = dayjs().utc().format("YYYY-MM-DD");
+    if (user.lastAdViewDate !== today) {
+      const updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: { todayAdViews: 0, lastAdViewDate: today },
+      });
+      return NextResponse.json({ user: updatedUser });
+    }
+
+    return NextResponse.json({ user });
+  } catch (error) {
+    console.error("GET error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const telegramData = await request.json(); // Ambil data dari body request
-  const today = dayjs().utc().format("YYYY-MM-DD");
+  try {
+    const data = await request.json();
+    const today = dayjs().utc().format("YYYY-MM-DD");
 
-  // Gunakan optional chaining dan nullish coalescing operator
-  const telegramName = telegramData?.telegramName ?? "Tidak memiliki nama";
-  const telegramUsername =
-    telegramData?.telegramUsername ?? "Tidak memiliki username";
-  const photoUrl = telegramData?.photoUrl ?? null; //tetap null
+    const user = await prisma.user.upsert({
+      where: { id: data.id },
+      update: {
+        telegramName: data.telegramName,
+        telegramUsername: data.telegramUsername,
+        photoUrl: data.photoUrl,
+      },
+      create: {
+        id: data.id,
+        telegramName: data.telegramName ?? "Pengguna",
+        telegramUsername: data.telegramUsername ?? "",
+        photoUrl: data.photoUrl ?? null,
+        danaNumber: "",
+        danaName: "",
+        balance: 0,
+        todayAdViews: 0,
+        totalAdViews: 0,
+        lastAdViewDate: today,
+      },
+    });
 
-  const user = await prisma.user.upsert({
-    where: { telegramUsername: telegramUsername }, // Cukup gunakan telegramUsername
-    update: {
-      telegramName, // Selalu update nama dan foto
-      photoUrl,
-    },
-    create: {
-      telegramName,
-      telegramUsername,
-      danaNumber: "",
-      danaName: "",
-      balance: 0,
-      todayAdViews: 0,
-      totalAdViews: 0,
-      lastAdViewDate: today,
-      photoUrl, // Simpan photoUrl
-    },
-  });
-
-  return NextResponse.json({ user });
+    return NextResponse.json({ user });
+  } catch (error) {
+    console.error("POST error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 export async function PUT(request: NextRequest) {
-  const { userId, balance, todayAdViews, totalAdViews, lastAdViewDate } =
-    await request.json();
+  try {
+    const { userId, balance, todayAdViews, totalAdViews, lastAdViewDate } =
+      await request.json();
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data: {
-      balance,
-      todayAdViews,
-      totalAdViews,
-      ...(lastAdViewDate && { lastAdViewDate }),
-      updatedAt: new Date(),
-    },
-  });
+    if (!userId) {
+      return NextResponse.json({ error: "User ID required" }, { status: 400 });
+    }
 
-  return NextResponse.json({ user });
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        balance,
+        todayAdViews,
+        totalAdViews,
+        ...(lastAdViewDate && { lastAdViewDate }),
+        updatedAt: new Date(),
+      },
+    });
+
+    return NextResponse.json({ user });
+  } catch (error) {
+    console.error("PUT error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
 }

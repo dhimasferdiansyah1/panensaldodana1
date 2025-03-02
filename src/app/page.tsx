@@ -1,11 +1,12 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image";
+import Image from "next/image"; // Import Image
 import { useRouter } from "next/navigation";
-import dayjs from "dayjs"; // Import dayjs
-import utc from "dayjs/plugin/utc"; // Import UTC plugin
-dayjs.extend(utc); // Extend dayjs with UTC plugin
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+dayjs.extend(utc);
 
 const HAS_SEEN_MODAL_KEY = "hasSeenModal";
 
@@ -17,6 +18,7 @@ declare global {
           user?: {
             id: number;
             first_name?: string;
+            last_name?: string; // Tambahkan last_name
             username?: string;
             photo_url?: string;
           };
@@ -51,11 +53,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [remainingQuota, setRemainingQuota] = useState(63);
   const [progress, setProgress] = useState(0);
-  const maxAdViews = 72;
-  const adReward = 7;
+  const maxAdViews = 63;
+  const adReward = 8;
   const [isWatchAdButtonDisabled, setIsWatchAdButtonDisabled] = useState(false);
   const [watchAdButtonCountdown, setWatchAdButtonCountdown] = useState(0);
   const router = useRouter();
+
+  // Tambahkan state untuk data profil
+  const [telegramName, setTelegramName] = useState<string>("Pengguna"); // Default value
+  const [telegramUsername, setTelegramUsername] = useState<string>(""); // Default value
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null); // Default value
 
   useEffect(() => {
     let storedId = localStorage.getItem("userId");
@@ -104,29 +111,22 @@ export default function Home() {
     try {
       const response = await fetch(`/api/user?userId=${id}`);
       const data = await response.json();
-      console.log("fetchUserData - Raw data from server:", data); // Log data mentah
+      console.log("fetchUserData - Raw data from server:", data);
 
       if (data.user) {
-        const today = dayjs().utc().format("YYYY-MM-DD"); // Gunakan dayjs UTC
-        console.log("fetchUserData - today (client):", today);
-        console.log(
-          "fetchUserData - lastAdViewDate from server:",
-          data.user.lastAdViewDate
-        );
-
+        const today = dayjs().utc().format("YYYY-MM-DD");
         let newTodayAdViews = data.user.todayAdViews;
 
         if (data.user.lastAdViewDate !== today) {
           console.log("fetchUserData - Resetting todayAdViews...");
           newTodayAdViews = 0;
-          // Update lastAdViewDate di server (penting!)
           await fetch("/api/user", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId: data.user.id,
-              lastAdViewDate: today, // Kirim tanggal UTC
-              todayAdViews: 0, // Reset juga di server
+              lastAdViewDate: today,
+              todayAdViews: 0,
             }),
           });
         }
@@ -138,6 +138,12 @@ export default function Home() {
         setRemainingQuota(maxAdViews - newTodayAdViews);
         setProgress((newTodayAdViews / maxAdViews) * 100);
         localStorage.setItem("userId", data.user.id);
+
+        // Update data profil
+        setTelegramName(data.user.telegramName);
+        setTelegramUsername(data.user.telegramUsername);
+        setPhotoUrl(data.user.photoUrl);
+
         return true;
       }
       return false;
@@ -152,26 +158,29 @@ export default function Home() {
   const saveNewUser = async () => {
     const telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
     try {
-      const today = dayjs().utc().format("YYYY-MM-DD"); // Tanggal UTC
+      const today = dayjs().utc().format("YYYY-MM-DD");
       const response = await fetch("/api/user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          telegramName: telegramData?.first_name || "Tanpa Nama",
-          telegramUsername: telegramData?.username || `user_${Math.random()}`,
-          photoUrl: telegramData?.photo_url || null,
-          lastAdViewDate: today, // Simpan tanggal UTC
+          telegramName: telegramData?.first_name || "Tidak memiliki nama", //dari telegram
+          telegramUsername: telegramData?.username || "Tidak memiliki username", // dari telegram
+          photoUrl: telegramData?.photo_url || null, //dari telegram
+          lastAdViewDate: today,
         }),
       });
       const data = await response.json();
-      console.log("saveNewUser - data from server:", data); // Log data
+      console.log("saveNewUser - data from server:", data);
       setUserId(data.user.id);
       localStorage.setItem("userId", data.user.id);
 
-      // Inisialisasi state
+      // Inisialisasi state, termasuk data profil
       setTodayAdViews(0);
       setRemainingQuota(maxAdViews);
       setProgress(0);
+      setTelegramName(telegramData?.first_name ?? "Tidak memiliki nama");
+      setTelegramUsername(telegramData?.username ?? "Tidak memiliki username");
+      setPhotoUrl(telegramData?.photo_url ?? null);
 
       return true;
     } catch (error) {
@@ -293,7 +302,7 @@ export default function Home() {
       try {
         const newBalance = balance + adReward;
         const newTodayAdViews = todayAdViews + 1;
-        const today = dayjs().utc().format("YYYY-MM-DD"); // Tanggal UTC
+        const today = dayjs().utc().format("YYYY-MM-DD");
 
         setBalance(newBalance);
         setTodayAdViews(newTodayAdViews);
@@ -309,7 +318,7 @@ export default function Home() {
             balance: newBalance,
             todayAdViews: newTodayAdViews,
             totalAdViews: totalAdViews + 1,
-            lastAdViewDate: today, // Kirim tanggal UTC
+            lastAdViewDate: today,
           }),
         });
       } catch (error) {

@@ -111,3 +111,18 @@ export async function PUT(request: NextRequest) {
     await prisma.$disconnect();
   }
 }
+
+// Tambahkan di API /app/api/user/route.ts
+export async function DELETE(request: NextRequest) {
+  const { userId } = await request.json();
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      balance: 0,
+      todayAdViews: 0,
+      totalAdViews: 0,
+      lastAdViewDate: dayjs().utc().format("YYYY-MM-DD"),
+    },
+  });
+  return NextResponse.json({ message: "User data reset" });
+}

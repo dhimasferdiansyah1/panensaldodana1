@@ -6,11 +6,12 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
+import { createId } from "@paralleldrive/cuid2"; // Import cuid
 dayjs.extend(utc);
 
 const HAS_SEEN_MODAL_KEY = "hasSeenModal";
 const APP_VERSION_KEY = "appVersion";
-const CURRENT_APP_VERSION = "1.1.0"; // Tentukan versi aplikasi saat ini
+const CURRENT_APP_VERSION = "1.0.0";
 
 declare global {
   interface Window {
@@ -40,6 +41,13 @@ declare global {
   }
 }
 
+const FALLBACK_TELEGRAM_DATA = {
+  id: 999999,
+  first_name: "TestUser",
+  username: "testuser_local",
+  photo_url: "/LOGO.jpg",
+};
+
 export default function Home() {
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [modalStage, setModalStage] = useState<
@@ -58,6 +66,7 @@ export default function Home() {
   const [telegramName, setTelegramName] = useState<string>("Pengguna");
   const [telegramUsername, setTelegramUsername] = useState<string>("");
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const maxAdViews = 63;
   const adReward = 8;
   const [isWatchAdButtonDisabled, setIsWatchAdButtonDisabled] = useState(false);
@@ -66,33 +75,42 @@ export default function Home() {
 
   useEffect(() => {
     const initializeUser = async () => {
-      // Cek versi aplikasi
       const storedVersion = localStorage.getItem(APP_VERSION_KEY);
-      if (storedVersion !== CURRENT_APP_VERSION) {
-        // Versi berubah, reset semua data di localStorage
+      let telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      let storedId = localStorage.getItem("userId");
+
+      const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      if (!telegramData && isLocalhost) {
+        console.log("Running on localhost, using fallback Telegram data");
+        telegramData = FALLBACK_TELEGRAM_DATA;
+      }
+
+      if (storedVersion !== CURRENT_APP_VERSION || !storedId) {
         localStorage.clear();
         sessionStorage.clear();
         localStorage.setItem(APP_VERSION_KEY, CURRENT_APP_VERSION);
-        console.log("App version changed. Resetting all data...");
+        console.log(
+          "App version changed or no user ID. Resetting local data..."
+        );
+        storedId = createId(); // Generate ID baru dengan cuid
+        localStorage.setItem("userId", storedId);
       }
 
-      const telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
-      let storedId = localStorage.getItem("userId");
-
-      // Ambil data dari Telegram jika tersedia
       if (telegramData) {
         setTelegramName(telegramData.first_name ?? "Pengguna");
         setTelegramUsername(telegramData.username ?? "");
         setPhotoUrl(telegramData.photo_url ?? null);
 
-        if (!storedId || storedVersion !== CURRENT_APP_VERSION) {
-          storedId = telegramData.id.toString();
-          localStorage.setItem("userId", storedId);
-          await saveNewUser(telegramData); // Simpan user baru
-        }
+        setUserId(storedId);
+        await checkAndSaveUser(storedId, telegramData);
+        await fetchUserData(storedId); // Ambil data setelah simpan
+      } else {
+        console.error("No Telegram data available and not on localhost");
+        setError("Tidak ada data Telegram tersedia");
+        return;
       }
-
-      setUserId(storedId);
 
       const hasSeenModal = sessionStorage.getItem(HAS_SEEN_MODAL_KEY);
       if (!hasSeenModal) {
@@ -109,10 +127,6 @@ export default function Home() {
       script.onload = () => console.log("Monetag SDK loaded");
       script.onerror = () => console.error("Failed to load Monetag SDK");
 
-      if (storedId) {
-        await fetchUserData(storedId);
-      }
-
       return () => {
         if (document.body.contains(script)) {
           document.body.removeChild(script);
@@ -125,9 +139,24 @@ export default function Home() {
 
   const fetchUserData = async (id: string) => {
     setLoading(true);
+    setError(null);
     try {
       const response = await fetch(`/api/user?userId=${id}`);
-      if (!response.ok) throw new Error("Failed to fetch user data");
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (response.status === 404) {
+          console.log(`User not found for ID: ${id}. Creating new user...`);
+          const telegramData =
+            window.Telegram?.WebApp?.initDataUnsafe?.user ||
+            FALLBACK_TELEGRAM_DATA;
+          await checkAndSaveUser(id, telegramData); // Buat user baru jika 404
+          await fetchUserData(id); // Coba ambil lagi setelah dibuat
+          return;
+        }
+        throw new Error(
+          `Failed to fetch user data: ${response.status} - ${errorText}`
+        );
+      }
 
       const data = await response.json();
       console.log("fetchUserData - Raw data:", data);
@@ -158,15 +187,20 @@ export default function Home() {
         setTelegramName(data.user.telegramName);
         setTelegramUsername(data.user.telegramUsername);
         setPhotoUrl(data.user.photoUrl);
+      } else {
+        throw new Error("No user data returned from API");
       }
     } catch (error) {
       console.error("Error fetching user data:", error);
+      setError(
+        error instanceof Error ? error.message : "Gagal memuat data pengguna"
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  type TelegramUser = {
+  type TelegramUserData = {
     id: number;
     first_name?: string;
     last_name?: string;
@@ -174,14 +208,18 @@ export default function Home() {
     photo_url?: string;
   };
 
-  const saveNewUser = async (telegramData: TelegramUser) => {
+  const checkAndSaveUser = async (
+    id: string,
+    telegramData: TelegramUserData
+  ) => {
     try {
       const today = dayjs().utc().format("YYYY-MM-DD");
+
       const response = await fetch("/api/user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: telegramData.id.toString(),
+          id: id, // Gunakan ID yang sudah di-generate dengan cuid
           telegramName: telegramData.first_name ?? "Pengguna",
           telegramUsername: telegramData.username ?? "",
           photoUrl: telegramData.photo_url ?? null,
@@ -189,23 +227,42 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok) throw new Error("Failed to save new user");
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Failed to save new user: ${response.status} - ${errorText}`
+        );
+      }
 
       const data = await response.json();
-      console.log("saveNewUser - Response:", data);
-      setUserId(data.user.id);
-      localStorage.setItem("userId", data.user.id);
+      console.log("checkAndSaveUser - New user saved:", data);
     } catch (error) {
-      console.error("Error saving new user:", error);
+      console.error("Error checking/saving user:", error);
+      setError(
+        error instanceof Error ? error.message : "Gagal menyimpan pengguna"
+      );
     }
   };
 
   const handleAgree = async () => {
     setLoading(true);
+    setError(null);
     if (!userId) {
-      const telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      let telegramData = window.Telegram?.WebApp?.initDataUnsafe?.user;
+      const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      if (!telegramData && isLocalhost) {
+        telegramData = FALLBACK_TELEGRAM_DATA;
+      }
       if (telegramData) {
-        await saveNewUser(telegramData);
+        const newId = createId(); // Generate ID baru dengan cuid
+        localStorage.setItem("userId", newId);
+        setUserId(newId);
+        await checkAndSaveUser(newId, telegramData);
+        await fetchUserData(newId);
+      } else {
+        setError("Tidak ada data Telegram tersedia");
       }
     } else {
       await fetchUserData(userId);
@@ -275,7 +332,8 @@ export default function Home() {
   };
 
   const handleWatchMainAd = async () => {
-    if (remainingQuota <= 0 || isWatchAdButtonDisabled || loading) return;
+    if (remainingQuota <= 0 || isWatchAdButtonDisabled || loading || !userId)
+      return;
 
     setLoading(true);
     setIsWatchAdButtonDisabled(true);
@@ -309,7 +367,7 @@ export default function Home() {
     };
 
     const adSuccess = await playAd();
-    if (adSuccess && userId) {
+    if (adSuccess) {
       try {
         const newBalance = balance + adReward;
         const newTodayAdViews = todayAdViews + 1;
@@ -321,7 +379,7 @@ export default function Home() {
         setRemainingQuota(maxAdViews - newTodayAdViews);
         setProgress((newTodayAdViews / maxAdViews) * 100);
 
-        await fetch("/api/user", {
+        const response = await fetch("/api/user", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -332,13 +390,33 @@ export default function Home() {
             lastAdViewDate: today,
           }),
         });
+
+        if (!response.ok) throw new Error("Failed to update user data");
       } catch (error) {
         console.error("Error updating user data:", error);
+        setError("Gagal memperbarui data pengguna");
       }
     }
 
     setLoading(false);
   };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <div className="bg-red-100 text-red-800 p-4 rounded-lg max-w-md">
+          <p className="font-semibold">Error</p>
+          <p>{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Coba Lagi
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900 font-sans py-8">

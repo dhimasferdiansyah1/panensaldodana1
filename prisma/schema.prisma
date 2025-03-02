@@ -14,7 +14,7 @@ datasource db {
 }
 
 model User {
-id                String      @id @default(cuid())
+id                String @id
 photoUrl String
   telegramName      String
   telegramUsername  String   @unique

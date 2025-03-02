@@ -18,13 +18,14 @@ export async function GET(request: NextRequest) {
     });
 
     if (!user) {
+      console.log(`User not found for ID: ${userId}`);
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const today = dayjs().utc().format("YYYY-MM-DD");
     if (user.lastAdViewDate !== today) {
       const updatedUser = await prisma.user.update({
-        where: { id: user.id },
+        where: { id: userId },
         data: { todayAdViews: 0, lastAdViewDate: today },
       });
       return NextResponse.json({ user: updatedUser });
@@ -47,15 +48,18 @@ export async function POST(request: NextRequest) {
     const data = await request.json();
     const today = dayjs().utc().format("YYYY-MM-DD");
 
-    const user = await prisma.user.upsert({
+    const existingUser = await prisma.user.findUnique({
       where: { id: data.id },
-      update: {
-        telegramName: data.telegramName,
-        telegramUsername: data.telegramUsername,
-        photoUrl: data.photoUrl,
-      },
-      create: {
-        id: data.id,
+    });
+
+    if (existingUser) {
+      console.log("User already exists:", existingUser);
+      return NextResponse.json({ user: existingUser });
+    }
+
+    const user = await prisma.user.create({
+      data: {
+        id: data.id, // ID sudah di-generate dengan cuid di client
         telegramName: data.telegramName ?? "Pengguna",
         telegramUsername: data.telegramUsername ?? "",
         photoUrl: data.photoUrl ?? null,
@@ -68,6 +72,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    console.log("New user created:", user);
     return NextResponse.json({ user });
   } catch (error) {
     console.error("POST error:", error);
@@ -100,6 +105,7 @@ export async function PUT(request: NextRequest) {
       },
     });
 
+    console.log("User updated:", user);
     return NextResponse.json({ user });
   } catch (error) {
     console.error("PUT error:", error);
@@ -110,19 +116,4 @@ export async function PUT(request: NextRequest) {
   } finally {
     await prisma.$disconnect();
   }
-}
-
-// Tambahkan di API /app/api/user/route.ts
-export async function DELETE(request: NextRequest) {
-  const { userId } = await request.json();
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      balance: 0,
-      todayAdViews: 0,
-      totalAdViews: 0,
-      lastAdViewDate: dayjs().utc().format("YYYY-MM-DD"),
-    },
-  });
-  return NextResponse.json({ message: "User data reset" });
 }

@@ -454,20 +454,10 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-900 font-sans py-8">
       <header className="p-4 text-center flex gap-2 items-center justify-center">
-        {photoUrl && (
-          <Image
-            src={photoUrl}
-            alt="Profile"
-            width={48}
-            height={48}
-            className="rounded-full"
-          />
-        )}
         <div>
-          <h1 className="text-2xl font-bold text-blue-600">Panen Saldo Dana</h1>
-          <p className="text-sm text-gray-600">
-            @{telegramUsername || "unknown"} (v{CURRENT_APP_VERSION})
-          </p>
+          <h1 className="text-2xl font-bold text-blue-600">
+            Panen Saldo Dana 1
+          </h1>
         </div>
       </header>
 
